@@ -51,6 +51,7 @@ jobs:
           if new not in text:
               if text.count(old) != 1:
                   raise SystemExit('Runestone source changed; refusing an unverified patch')
+              path.chmod(path.stat().st_mode | 0o200)
               path.write_text(text.replace(old, new, 1))
 
       - name: Build iOS app
