@@ -25,21 +25,49 @@ jobs:
       - name: Show Xcode version
         run: xcodebuild -version
 
-      - name: Build iOS app
+      - name: Resolve Swift packages
         shell: bash
         run: |
           set -euo pipefail
           mkdir -p build
+          xcodebuild -resolvePackageDependencies \
+            -project misaka.xcodeproj \
+            -scheme misaka \
+            -derivedDataPath build/DerivedData \
+            2>&1 | tee build/xcodebuild.log
+
+      - name: Patch Runestone delegate availability
+        shell: python
+        run: |
+          from pathlib import Path
+          root = Path('build/DerivedData/SourcePackages/checkouts')
+          files = list(root.glob('*/Sources/Runestone/TextView/SearchAndReplace/UITextSearchingHelper.swift'))
+          if len(files) != 1:
+              raise SystemExit(f'Expected one Runestone source file, found {len(files)}')
+          path = files[0]
+          text = path.read_text()
+          old = 'extension UITextSearchingHelper: UIFindInteractionDelegate {'
+          new = '@available(iOS 16, *)\n' + old
+          if new not in text:
+              if text.count(old) != 1:
+                  raise SystemExit('Runestone source changed; refusing an unverified patch')
+              path.write_text(text.replace(old, new, 1))
+
+      - name: Build iOS app
+        shell: bash
+        run: |
+          set -euo pipefail
           xcodebuild build \
             -project misaka.xcodeproj \
             -scheme misaka \
             -configuration Debug \
             -destination 'generic/platform=iOS' \
             -derivedDataPath build/DerivedData \
+            -disableAutomaticPackageResolution \
             ONLY_ACTIVE_ARCH=NO \
             CODE_SIGNING_ALLOWED=NO \
             CODE_SIGNING_REQUIRED=NO \
-            2>&1 | tee build/xcodebuild.log
+            2>&1 | tee -a build/xcodebuild.log
 
       - name: Package IPA
         shell: bash
