@@ -1,0 +1,73 @@
+name: Build misaka IPA
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/build-ipa.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: macos-26
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Install signing utility
+        run: brew install ldid
+
+      - name: Show Xcode version
+        run: xcodebuild -version
+
+      - name: Build iOS app
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p build
+          xcodebuild build \
+            -project misaka.xcodeproj \
+            -scheme misaka \
+            -configuration Debug \
+            -destination 'generic/platform=iOS' \
+            -derivedDataPath build/DerivedData \
+            ONLY_ACTIVE_ARCH=NO \
+            CODE_SIGNING_ALLOWED=NO \
+            CODE_SIGNING_REQUIRED=NO \
+            2>&1 | tee build/xcodebuild.log
+
+      - name: Package IPA
+        shell: bash
+        run: |
+          set -euo pipefail
+          APP=build/DerivedData/Build/Products/Debug-iphoneos/misaka.app
+          test -d "$APP"
+          rm -rf build/Payload
+          mkdir -p build/Payload
+          ditto "$APP" build/Payload/misaka.app
+          rm -rf build/Payload/misaka.app/_CodeSignature
+          rm -f build/Payload/misaka.app/embedded.mobileprovision
+          ldid -Sentitlements.plist build/Payload/misaka.app/misaka
+          (cd build && zip -qry misaka.ipa Payload)
+
+      - name: Upload IPA
+        uses: actions/upload-artifact@v4
+        with:
+          name: misakaReborn-IPA
+          path: build/misaka.ipa
+          if-no-files-found: error
+          retention-days: 7
+
+      - name: Upload build log
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: misakaReborn-build-log
+          path: build/xcodebuild.log
+          if-no-files-found: ignore
+          retention-days: 7
